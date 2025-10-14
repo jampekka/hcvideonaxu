@@ -5,204 +5,260 @@
 <title>Minimal Video Annotator (Mediabunny + Dexie)</title>
 
 <style>
-  :root { --m: 10px; }
-  html, body { height: 100%; margin: 0; }
-  body { font-family: system-ui, sans-serif; }
+    :root {
+        --m: 10px;
+    }
 
-  /* App layout: toolbar on top, stage fills the rest */
-  #app { display: flex; flex-direction: column; height: 100vh; }
-  #toolbar { display: flex; gap: 8px; align-items: center; padding: var(--m); border-bottom: 1px solid #e5e5e5; }
-  #stageWrap { flex: 1; min-height: 0; /* allow child to size */ }
-  #stage { position: relative; width: 100%; height: 100%; display: grid; place-items: start center; background: #111; }
+    html,
+    body {
+        height: 100%;
+        margin: 0;
+    }
 
-  /* The render surface fills available size, preserving source pixel mapping via CSS scaling */
-  #frame { display: block; background: #000; max-width: 100%; max-height: 100%; }
-  #overlay { position: absolute; inset: 0; pointer-events: none; }
-  .marker { position: absolute; width: 8px; height: 8px; background: red; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+    body {
+        font-family: system-ui, sans-serif;
+    }
+
+    /* App layout: toolbar on top, stage fills the rest */
+    #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+
+    #toolbar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: var(--m);
+        border-bottom: 1px solid #e5e5e5;
+    }
+
+    #stageWrap {
+        flex: 1;
+        min-height: 0;
+        /* allow child to size */
+    }
+
+    #stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: start center;
+        background: #111;
+    }
+
+    /* The render surface fills available size, preserving source pixel mapping via CSS scaling */
+    #frame {
+        display: block;
+        background: #000;
+        max-width: 100%;
+        max-height: 100%;
+    }
+
+    #overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+    }
+
+    .marker {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        background: red;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+    }
 </style>
 
 <body>
-  <div id="app">
-    <div id="toolbar">
-      <input type="file" id="file" accept="video/*">
-      <span id="info" style="margin-left:auto; opacity:.75"></span>
+    <div id="app">
+        <div id="toolbar">
+            <input type="file" id="file" accept="video/*">
+            <span id="info" style="margin-left:auto; opacity:.75"></span>
+        </div>
+
+        <div id="stageWrap">
+            <div id="stage">
+                <canvas id="frame"></canvas>
+                <div id="overlay"></div>
+            </div>
+        </div>
     </div>
 
-    <div id="stageWrap">
-      <div id="stage">
-        <canvas id="frame"></canvas>
-        <div id="overlay"></div>
-      </div>
-    </div>
-  </div>
+    <script type="module">
+        import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
+        import Dexie, { liveQuery } from "https://esm.sh/dexie@3"
 
-  <script type="module">
-    import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
-    import Dexie, { liveQuery } from "https://esm.sh/dexie@3"
+        // ------------------------------
+        // minimal helpers
+        // ------------------------------
+        const $ = s => document.querySelector(s)
+        const fileInput = $('#file')
+        const labelInput = $('#label')
+        const info = $('#info')
+        const frameCanvas = $('#frame')
+        const overlay = $('#overlay')
+        const ctx = frameCanvas.getContext('2d')
 
-    // ------------------------------
-    // minimal helpers
-    // ------------------------------
-    const $ = s => document.querySelector(s)
-    const fileInput = $('#file')
-    const labelInput = $('#label')
-    const info = $('#info')
-    const frameCanvas = $('#frame')
-    const overlay = $('#overlay')
-    const ctx = frameCanvas.getContext('2d')
+        const dbNameFor = (file) => `va-${file.name}:${file.size}:${file.lastModified}`
 
-    const dbNameFor = (file) => `va-${file.name}:${file.size}:${file.lastModified}`
-
-    // runtime state (per loaded file)
-    let db, sub, input, vtrack, cSink
-    let width = 0, height = 0
-    let currentFrame = 0
-    let pendingFrame = 0
-    let frameTimes = [] // list of timestamps (seconds) from EncodedPacketSink (metadataOnly)
-    let ready = false
+        // runtime state (per loaded file)
+        let db, sub, input, vtrack, cSink
+        let width = 0, height = 0
+        let currentFrame = 0
+        let pendingFrame = 0
+        let frameTimes = [] // list of timestamps (seconds) from EncodedPacketSink (metadataOnly)
+        let ready = false
 
 
-    let mouseX = 0;
-    let mouseY = 0;
+        let mouseX = 0;
+        let mouseY = 0;
 
-    document.addEventListener('mousemove', (e) => {
-      mouseX = e.clientX;
-      mouseY = e.clientY;
-    });
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
 
-    // ------------------------------
-    // file load -> setup everything
-    // ------------------------------
-    fileInput.onchange = async (e) => {
-      const file = e.target.files[0]
+        // ------------------------------
+        // file load -> setup everything
+        // ------------------------------
+        fileInput.onchange = async (e) => {
+            const file = e.target.files[0]
 
-      // fresh DB each run (dev). Remove Dexie.delete for persistence.
-      const name = dbNameFor(file)
-      await Dexie.delete(name)
-      db = new Dexie(name)
-      db.version(1).stores({
-        annotations: "[timeSec+x+y+label+insertedAt], frame, timeSec, x, y, label, insertedAt",
-        videoMetadata: "id"
-      })
+            // fresh DB each run (dev). Remove Dexie.delete for persistence.
+            const name = dbNameFor(file)
+            await Dexie.delete(name)
+            db = new Dexie(name)
+            db.version(1).stores({
+                annotations: "[timeSec+x+y+label+insertedAt], frame, timeSec, x, y, label, insertedAt",
+                videoMetadata: "id"
+            })
 
-      // mediabunny: input + track
-      input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) })
-      vtrack = await input.getPrimaryVideoTrack()
+            // mediabunny: input + track
+            input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) })
+            vtrack = await input.getPrimaryVideoTrack()
 
-      // CanvasSink handles frame lifetimes/rotation; we draw its canvases to ours
-      cSink = new CanvasSink(vtrack, { poolSize: 1, fit: 'contain' })
+            // CanvasSink handles frame lifetimes/rotation; we draw its canvases to ours
+            cSink = new CanvasSink(vtrack, { poolSize: 1, fit: 'contain' })
 
-      // dimensions
-      width  = vtrack.displayWidth
-      height = vtrack.displayHeight
-      frameCanvas.width = width
-      frameCanvas.height = height
+            // dimensions
+            width = vtrack.displayWidth
+            height = vtrack.displayHeight
+            frameCanvas.width = width
+            frameCanvas.height = height
 
-      // Build metadata-only frame timestamp list (fast, no decode)
-      const pSink = new EncodedPacketSink(vtrack)
-      frameTimes = []
-      for await (const pkt of pSink.packets(undefined, undefined, { metadataOnly: true })) {
-        frameTimes.push(pkt.timestamp)
-      }
+            // Build metadata-only frame timestamp list (fast, no decode)
+            const pSink = new EncodedPacketSink(vtrack)
+            frameTimes = []
+            for await (const pkt of pSink.packets(undefined, undefined, { metadataOnly: true })) {
+                frameTimes.push(pkt.timestamp)
+            }
 
-      // Store metadata (timestamps included) as a single object
-      await db.videoMetadata.clear()
-      await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
+            // Store metadata (timestamps included) as a single object
+            await db.videoMetadata.clear()
+            await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
 
-      // reactive markers
-      sub?.unsubscribe?.()
-      sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
+            // reactive markers
+            sub?.unsubscribe?.()
+            sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
 
-      // draw first frame
-      currentFrame = 0
-      await drawFrame()
-      layoutOverlay()
-      info.textContent = `frames: ${frameTimes.length}  size: ${width}×${height}`
+            // draw first frame
+            currentFrame = 0
+            await drawFrame()
+            layoutOverlay()
+            info.textContent = `frames: ${frameTimes.length}  size: ${width}×${height}`
 
-      // enable interactions
-      ready = true
+            // enable interactions
+            ready = true
 
-      // --- minimal sanity tests ---
-      console.assert(frameTimes.length > 0, 'No frame timestamps collected')
-      const iter = cSink.canvases(frameTimes[0] ?? 0)
-      const first = (await iter.next()).value
-      console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
-    }
+            // --- minimal sanity tests ---
+            console.assert(frameTimes.length > 0, 'No frame timestamps collected')
+            const iter = cSink.canvases(frameTimes[0] ?? 0)
+            const first = (await iter.next()).value
+            console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
+        }
 
-    // Keep overlay sized/aligned to the canvas box inside the stage
-    function layoutOverlay() {
-      // overlay sits on top of the canvas within #stage; stretch it to canvas CSS size
-      const rect = frameCanvas.getBoundingClientRect()
-      const stageRect = document.getElementById('stage').getBoundingClientRect()
-      // Position overlay relative to stage
-      overlay.style.position = 'absolute'
-      overlay.style.left = (rect.left - stageRect.left) + 'px'
-      overlay.style.top  = (rect.top - stageRect.top) + 'px'
-      overlay.style.width = rect.width + 'px'
-      overlay.style.height = rect.height + 'px'
-      overlay.style.pointerEvents = ready ? 'auto' : 'none'
-    }
-    addEventListener('resize', layoutOverlay)
+        // Keep overlay sized/aligned to the canvas box inside the stage
+        function layoutOverlay() {
+            // overlay sits on top of the canvas within #stage; stretch it to canvas CSS size
+            const rect = frameCanvas.getBoundingClientRect()
+            const stageRect = document.getElementById('stage').getBoundingClientRect()
+            // Position overlay relative to stage
+            overlay.style.position = 'absolute'
+            overlay.style.left = (rect.left - stageRect.left) + 'px'
+            overlay.style.top = (rect.top - stageRect.top) + 'px'
+            overlay.style.width = rect.width + 'px'
+            overlay.style.height = rect.height + 'px'
+            overlay.style.pointerEvents = ready ? 'auto' : 'none'
+        }
+        addEventListener('resize', layoutOverlay)
 
-    // Render a frame using CanvasSink by starting an iterator at the target timestamp
-    async function drawFrame() {
-      const t = frameTimes[currentFrame] ?? 0
-      const c = await cSink.getCanvas(t)
-      ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
-      ctx.drawImage(c.canvas, 0, 0)
-    }
+        // Render a frame using CanvasSink by starting an iterator at the target timestamp
+        async function drawFrame() {
+            const t = frameTimes[currentFrame] ?? 0
+            const c = await cSink.getCanvas(t)
+            ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
+            ctx.drawImage(c.canvas, 0, 0)
+        }
 
-    // markers rendering (HTML/CSS)
-    async function renderMarkers(anns) {
-      overlay.innerHTML = ""
-      const rect = frameCanvas.getBoundingClientRect()
-      const t = frameTimes[currentFrame] ?? 0
-      for (const a of anns) {
-        if (Math.abs(a.timeSec - t) > 1e-6) continue
-        const m = document.createElement('div')
-        m.className = 'marker'
-        // Convert from source pixels to displayed CSS pixels
-        m.style.left = (a.x / width * rect.width) + 'px'
-        m.style.top  = (a.y / height * rect.height) + 'px'
-        m.title = a.label || ''
-        overlay.appendChild(m)
-      }
-    }
+        // markers rendering (HTML/CSS)
+        async function renderMarkers(anns) {
+            overlay.innerHTML = ""
+            const rect = frameCanvas.getBoundingClientRect()
+            const t = frameTimes[currentFrame] ?? 0
+            for (const a of anns) {
+                if (Math.abs(a.timeSec - t) > 1e-6) continue
+                const m = document.createElement('div')
+                m.className = 'marker'
+                // Convert from source pixels to displayed CSS pixels
+                m.style.left = (a.x / width * rect.width) + 'px'
+                m.style.top = (a.y / height * rect.height) + 'px'
+                m.title = a.label || ''
+                overlay.appendChild(m)
+            }
+        }
 
-    // click to add annotation
-    const addAnnotation = async (marker) => {
-      if (!ready) return
-      const rect = frameCanvas.getBoundingClientRect()
-      const x = (mouseX - rect.left) * (width / rect.width)
-      const y = (mouseY - rect.top)  * (height / rect.height)
-      const timeSec = frameTimes[currentFrame]
-      await db.annotations.put({ frame: currentFrame, timeSec, x, y, marker, insertedAt: new Date().toISOString() })
-      // re-render markers immediately for snappier UX
-      //await renderMarkers(await db.annotations.toArray())
-    }
-
-    const setFrame = async (n) => {
-      if (!ready) return // TODO: Setting the frame should always work, but render opportunistically
-      currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
-
-      await drawFrame()
-      await renderMarkers(await db.annotations.toArray())
-    }
+        // click to add annotation
+        const addAnnotation = async (marker) => {
+            if (!ready) return
+            const rect = frameCanvas.getBoundingClientRect()
+            const x = (mouseX - rect.left) * (width / rect.width)
+            const y = (mouseY - rect.top) * (height / rect.height)
+            const timeSec = frameTimes[currentFrame]
+            await db.annotations.put({ frame: currentFrame, timeSec, x, y, marker, insertedAt: new Date().toISOString() })
+            // re-render markers immediately for snappier UX
+            //await renderMarkers(await db.annotations.toArray())
+        }
 
 
-    const stepFrames = async (n) => {
-        return setFrame(currentFrame + n)
-    }
 
-    document.addEventListener('keydown', (e) => {
-      if (!ready) return
-      if (e.key === 'ArrowLeft') stepFrames(-1)
-      if (e.key === 'ArrowRight') stepFrames(1)
+        const setFrame = async (n) => {
+            if (!ready) return // TODO: Setting the frame should always work, but render opportunistically
+            currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
 
-      if (/^[a-z0-9]$/.test(e.key)) {
-        addAnnotation(e.key)
-      }
-    })
-  </script>
+            await drawFrame()
+            await renderMarkers(await db.annotations.toArray())
+        }
+
+
+        const stepFrames = async (n) => {
+            return setFrame(currentFrame + n)
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (!ready) return
+            if (e.key === 'ArrowLeft') stepFrames(-1)
+            if (e.key === 'ArrowRight') stepFrames(1)
+
+            if (/^[a-z0-9]$/.test(e.key)) {
+                addAnnotation(e.key)
+            }
+        })
+    </script>
 </body>
+
 </html>
