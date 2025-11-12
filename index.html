@@ -34,6 +34,20 @@
         border-bottom: 1px solid #e5e5e5;
     }
 
+    #main {
+        display: flex;
+        flex-direction: row;
+        height: 100%;
+    }
+
+    #markerTable {
+        width: 200px;
+        /*border-collapse: collapse;*/
+        border: 1px solid #ccc;
+        height: auto;
+        align-self: flex-start;
+    }
+
     #video {
 
         flex: 1 1 0;
@@ -92,224 +106,263 @@
         <div id="toolbar">
             <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
             <input type="file" id="file" accept="video/*" style="display:none;">
-            <label for="file" id="fileLabel" style="padding:8px 16px; background:#eee; border-radius:4px; cursor:pointer;">
+            <label for="file" id="fileLabel"
+                style="padding:8px 16px; background:#eee; border-radius:4px; cursor:pointer;">
                 Select Video
             </label>
         </div>
 
-        <div id="video">
-            <div id="frameContainer">
-                <canvas id="frame"></canvas>
-                <div id="overlay"></div>
+        <div id="main">
+            <div id="video">
+                <div id="frameContainer">
+                    <canvas id="frame"></canvas>
+                    <div id="overlay"></div>
+                </div>
             </div>
+            <table id="markerTable">
+                <thead>
+                    <tr>
+                        <th>Marker</th>
+                        <th>x</th>
+                        <th>y</th>
+                        <th>&nbsp;</th>
+                    </tr>
+                </thead>
+                <tbody id="markerTableBody">
+                    <!-- Markers will be populated here -->
+                </tbody>
+            </table> 
         </div>
-
         <div id="status">
-            Time: <span id="currentTime">-</span>/<span id="totalTime">-</span>s
-            &nbsp; | &nbsp
-            Frame: <span id="currentFrame">-</span>/<span id="totalFrames">-</span>
-        </div>
-    </div>
+                Time: <span id="currentTime">-</span>/<span id="totalTime">-</span>s
+                &nbsp; | &nbsp
+                Frame: <span id="currentFrame">-</span>/<span id="totalFrames">-</span>
+            </div>
 
-    <script type="module">
-        import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
-        import Dexie, { liveQuery } from "https://esm.sh/dexie@3"
+        <script type="module">
+            import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
+            import Dexie, { liveQuery } from "https://esm.sh/dexie@3"
 
-        // ------------------------------
-        // minimal helpers
-        // ------------------------------
-        const $ = s => document.querySelector(s)
-        const fileInput = $('#file')
-        const labelInput = $('#label')
-        const info = $('#info')
-        const frameCanvas = $('#frame')
-        const overlay = $('#overlay')
-        const ctx = frameCanvas.getContext('2d')
+            // ------------------------------
+            // minimal helpers
+            // ------------------------------
+            const $ = s => document.querySelector(s)
+            const fileInput = $('#file')
+            const labelInput = $('#label')
+            const info = $('#info')
+            const frameCanvas = $('#frame')
+            const overlay = $('#overlay')
+            const markerTableBody = $('#markerTableBody')
+            const ctx = frameCanvas.getContext('2d')
 
-        const dbNameFor = (file) => `va-${file.name}:${file.size}:${file.lastModified}`
+            const dbNameFor = (file) => `va-${file.name}:${file.size}:${file.lastModified}`
 
-        // runtime state (per loaded file)
-        let db, sub, input, vtrack, cSink
-        let width = 0, height = 0
-        let currentFrame = 0
-        let pendingFrame = 0
-        let frameTimes = [] // list of timestamps (seconds) from EncodedPacketSink (metadataOnly)
-        let ready = false
-
-
-        let mouseX = 0;
-        let mouseY = 0;
-
-        document.addEventListener('mousemove', (e) => {
-            mouseX = e.clientX;
-            mouseY = e.clientY;
-        });
-
-        // ------------------------------
-        // file load -> setup everything
-        // ------------------------------
-        fileInput.onchange = async (e) => {
-            const file = e.target.files[0]
-
-            // fresh DB each run (dev). Remove Dexie.delete for persistence.
-            const name = dbNameFor(file)
-            await Dexie.delete(name)
-            db = new Dexie(name)
-            db.version(1).stores({
-                annotations: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
-                videoMetadata: "id"
-            })
-
-            // mediabunny: input + track
-            input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) })
-            vtrack = await input.getPrimaryVideoTrack()
-
-            // CanvasSink handles frame lifetimes/rotation; we draw its canvases to ours
-            cSink = new CanvasSink(vtrack, { poolSize: 1, fit: 'contain' })
-
-            // dimensions
-            width = vtrack.displayWidth
-            height = vtrack.displayHeight
-            frameCanvas.width = width
-            frameCanvas.height = height
-
-            // Build metadata-only frame timestamp list (fast, no decode)
-            const pSink = new EncodedPacketSink(vtrack)
-            frameTimes = []
-            for await (const pkt of pSink.packets(undefined, undefined, { metadataOnly: true })) {
-                frameTimes.push(pkt.timestamp)
-            }
-
-            frameTimes.sort((a, b) => a - b)
-
-            const frameSlider = $('#frameSlider')
-            frameSlider.max = frameTimes.length - 1
-            frameSlider.disabled = false
-
-            frameSlider.addEventListener('input', (e) => {
-                setFrame(Number(e.target.value))
-            })
-
-            // Store metadata (timestamps included) as a single object
-            await db.videoMetadata.clear()
-            await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
-
-            // reactive markers
-            sub?.unsubscribe?.()
-            sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
-
-            
-            $('#totalFrames').textContent = frameTimes.length
-            $('#totalTime').textContent = (frameTimes.at(-1)).toFixed(2)
-
-            ready = true
-            setFrame(0)
-
-            // --- minimal sanity tests ---
-            console.assert(frameTimes.length > 0, 'No frame timestamps collected')
-            const iter = cSink.canvases(frameTimes[0] ?? 0)
-            const first = (await iter.next()).value
-            console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
-        }
+            // runtime state (per loaded file)
+            let db, sub, input, vtrack, cSink
+            let width = 0, height = 0
+            let currentFrame = 0
+            let pendingFrame = 0
+            let frameTimes = [] // list of timestamps (seconds) from EncodedPacketSink (metadataOnly)
+            let ready = false
 
 
-        // Render a frame using CanvasSink by starting an iterator at the target timestamp
-        /*async function drawFrame() {
-            const t = frameTimes[currentFrame] ?? 0
-            const c = await cSink.getCanvas(t)
-            ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
-            ctx.drawImage(c.canvas, 0, 0)
-        }*/
+            let mouseX = 0;
+            let mouseY = 0;
 
-        // markers rendering (HTML/CSS)
-        async function renderMarkers(anns) {
-            overlay.innerHTML = ""
-            const rect = frameCanvas.getBoundingClientRect()
-            const t = frameTimes[currentFrame] ?? 0
-            for (const a of anns) {
-                if (Math.abs(a.time - t) > 1e-6) continue
-                const m = document.createElement('div')
-                m.className = 'marker'
-                // Convert from source pixels to displayed CSS pixels
-                m.style.left = (a.x / width * rect.width) + 'px'
-                m.style.top = (a.y / height * rect.height) + 'px'
-                m.title = a.label || ''
-                overlay.appendChild(m)
-            }
-        }
+            document.addEventListener('mousemove', (e) => {
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
 
-        // click to add annotation
-        const addAnnotation = async (marker) => {
-            if (!ready) return
-            const rect = frameCanvas.getBoundingClientRect()
-            const x = (mouseX - rect.left) * (width / rect.width)
-            const y = (mouseY - rect.top) * (height / rect.height)
-            const time = frameTimes[currentFrame]
-            await db.annotations.put({
-                time,
-                x, y,
-                marker,
-                frame: currentFrame,
-                insertedAt: new Date().toISOString() })
-            // re-render markers immediately for snappier UX
-            //await renderMarkers(await db.annotations.toArray())
-        }
+            // ------------------------------
+            // file load -> setup everything
+            // ------------------------------
+            fileInput.onchange = async (e) => {
+                const file = e.target.files[0]
 
-        let rendering = false
-        let renderedFrame = -1
-        async function renderOnce(target) {
-            const t = frameTimes[target] ?? 0
-            const c = await cSink.getCanvas(t)
-            ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
-            ctx.drawImage(c.canvas, 0, 0)
-            renderedFrame = target
-            //console.log("Rendered frame", { renderedFrame, t })
-            await renderMarkers(await db.annotations.toArray())
-        }
+                // fresh DB each run (dev). Remove Dexie.delete for persistence.
+                const name = dbNameFor(file)
+                await Dexie.delete(name)
+                db = new Dexie(name)
+                db.version(1).stores({
+                    annotations: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
+                    videoMetadata: "id"
+                })
 
-        async function pumpRender() {
-            if (!ready || rendering) return
-            //console.log("Pumping render", { ready, rendering, currentFrame })
+                // mediabunny: input + track
+                input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) })
+                vtrack = await input.getPrimaryVideoTrack()
+
+                // CanvasSink handles frame lifetimes/rotation; we draw its canvases to ours
+                cSink = new CanvasSink(vtrack, { poolSize: 1, fit: 'contain' })
+
+                // dimensions
+                width = vtrack.displayWidth
+                height = vtrack.displayHeight
+                frameCanvas.width = width
+                frameCanvas.height = height
+
+                // Build metadata-only frame timestamp list (fast, no decode)
+                const pSink = new EncodedPacketSink(vtrack)
+                frameTimes = []
+                for await (const pkt of pSink.packets(undefined, undefined, { metadataOnly: true })) {
+                    frameTimes.push(pkt.timestamp)
+                }
+
+                frameTimes.sort((a, b) => a - b)
+
+                const frameSlider = $('#frameSlider')
+                frameSlider.max = frameTimes.length - 1
+                frameSlider.disabled = false
+
+                frameSlider.addEventListener('input', (e) => {
+                    setFrame(Number(e.target.value))
+                })
+
+                // Store metadata (timestamps included) as a single object
+                await db.videoMetadata.clear()
+                await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
+
+                // reactive markers
+                sub?.unsubscribe?.()
+                sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
 
 
-            rendering = true
-            const target = currentFrame
-            try {
-                await renderOnce(target)
-            } finally {
-                rendering = false
+                $('#totalFrames').textContent = frameTimes.length
+                $('#totalTime').textContent = (frameTimes.at(-1)).toFixed(2)
+
+                ready = true
+                setFrame(0)
+
+                // --- minimal sanity tests ---
+                console.assert(frameTimes.length > 0, 'No frame timestamps collected')
+                const iter = cSink.canvases(frameTimes[0] ?? 0)
+                const first = (await iter.next()).value
+                console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
             }
 
 
-            // If the desired frame changed while we were rendering, render again.
-            if (currentFrame !== target) {
-                //console.log("Repumping", { target, renderedFrame, currentFrame })
+            // Render a frame using CanvasSink by starting an iterator at the target timestamp
+            /*async function drawFrame() {
+                const t = frameTimes[currentFrame] ?? 0
+                const c = await cSink.getCanvas(t)
+                ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
+                ctx.drawImage(c.canvas, 0, 0)
+            }*/
+
+            // markers rendering (HTML/CSS)
+            async function renderMarkers(anns) {
+                overlay.innerHTML = ""
+                markerTableBody.innerHTML = ""
+                const rect = frameCanvas.getBoundingClientRect()
+                const t = frameTimes[currentFrame] ?? 0
+                for (const a of anns) {
+                    if (Math.abs(a.time - t) > 1e-6) continue
+                    const m = document.createElement('div')
+                    m.className = 'marker'
+                    // Convert from source pixels to displayed CSS pixels
+                    m.style.left = (a.x / width * rect.width) + 'px'
+                    m.style.top = (a.y / height * rect.height) + 'px'
+                    m.title = a.label || ''
+                    overlay.appendChild(m)
+
+                    // Add to marker table
+                    const row = document.createElement('tr')
+                    const markerCell = document.createElement('td')
+                    markerCell.textContent = a.marker
+                    const xCell = document.createElement('td')
+                    xCell.textContent = a.x.toFixed(2)
+                    const yCell = document.createElement('td')
+                    yCell.textContent = a.y.toFixed(2)
+                    const actionCell = document.createElement('td')
+                    const deleteButton = document.createElement('button')
+                    deleteButton.textContent = 'Delete'
+                    deleteButton.onclick = async () => {
+                        await db.annotations.delete([a.time, a.x, a.y, a.marker, a.insertedAt])
+                        await renderMarkers(await db.annotations.toArray())
+                    }
+                    actionCell.appendChild(deleteButton)
+                    row.appendChild(markerCell)
+                    row.appendChild(xCell)
+                    row.appendChild(yCell)
+                    row.appendChild(actionCell)
+                    markerTableBody.appendChild(row)
+                }
+            }
+
+            // click to add annotation
+            const addAnnotation = async (marker) => {
+                if (!ready) return
+                const rect = frameCanvas.getBoundingClientRect()
+                const x = (mouseX - rect.left) * (width / rect.width)
+                const y = (mouseY - rect.top) * (height / rect.height)
+                const time = frameTimes[currentFrame]
+                await db.annotations.put({
+                    time,
+                    x, y,
+                    marker,
+                    frame: currentFrame,
+                    insertedAt: new Date().toISOString()
+                })
+                // re-render markers immediately for snappier UX
+                //await renderMarkers(await db.annotations.toArray())
+            }
+
+            let rendering = false
+            let renderedFrame = -1
+            async function renderOnce(target) {
+                const t = frameTimes[target] ?? 0
+                const c = await cSink.getCanvas(t)
+                ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
+                ctx.drawImage(c.canvas, 0, 0)
+                renderedFrame = target
+                //console.log("Rendered frame", { renderedFrame, t })
+                await renderMarkers(await db.annotations.toArray())
+            }
+
+            async function pumpRender() {
+                if (!ready || rendering) return
+                //console.log("Pumping render", { ready, rendering, currentFrame })
+
+
+                rendering = true
+                const target = currentFrame
+                try {
+                    await renderOnce(target)
+                } finally {
+                    rendering = false
+                }
+
+
+                // If the desired frame changed while we were rendering, render again.
+                if (currentFrame !== target) {
+                    //console.log("Repumping", { target, renderedFrame, currentFrame })
+                    pumpRender()
+                }
+            }
+
+
+            const setFrame = (n) => {
+                if (!ready) return
+                currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
+                $('#currentFrame').textContent = currentFrame
+                $('#currentTime').textContent = (frameTimes[currentFrame] ?? 0).toFixed(2)
                 pumpRender()
             }
-        }
 
 
-        const setFrame = (n) => {
-            if (!ready) return
-            currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
-            $('#currentFrame').textContent = currentFrame
-            $('#currentTime').textContent = (frameTimes[currentFrame] ?? 0).toFixed(2)
-            pumpRender()
-        }
+            const stepFrames = (n) => setFrame(currentFrame + n)
 
+            document.addEventListener('keydown', (e) => {
+                if (!ready) return
+                if (e.key === 'ArrowLeft') stepFrames(-1)
+                if (e.key === 'ArrowRight') stepFrames(1)
 
-        const stepFrames = (n) => setFrame(currentFrame + n)
-
-        document.addEventListener('keydown', (e) => {
-            if (!ready) return
-            if (e.key === 'ArrowLeft') stepFrames(-1)
-            if (e.key === 'ArrowRight') stepFrames(1)
-
-            if (/^[a-z0-9]$/.test(e.key)) {
-                addAnnotation(e.key)
-            }
-        })
-    </script>
+                if (/^[a-z0-9]$/.test(e.key)) {
+                    addAnnotation(e.key)
+                }
+            })
+        </script>
 </body>
 
 </html>
