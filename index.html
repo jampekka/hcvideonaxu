@@ -49,7 +49,6 @@
     }
 
     #video {
-
         flex: 1 1 0;
         position: relative;
         width: 100%;
@@ -59,6 +58,7 @@
         justify-content: center;
         overflow: hidden;
         background: #000;
+        cursor: crosshair;
     }
 
     #frameContainer {
@@ -112,6 +112,12 @@
                 style="padding:8px 16px; background:#eee; border-radius:4px; cursor:pointer;">
                 Select Video
             </label>
+            <button id="saveMarkers">Save markers</button>
+
+            <input type="file" id="doLoadMarkers" accept="application/json" style="display:none" />
+            <label for="doLoadMarkers" id="loadMarkers">Load markers</label>
+
+            <button id="clearMarkers">Clear markers</button>
         </div>
 
         <div id="main">
@@ -133,13 +139,13 @@
                 <tbody id="markerTableBody">
                     <!-- Markers will be populated here -->
                 </tbody>
-            </table> 
+            </table>
         </div>
         <div id="status">
-                Time: <span id="currentTime">-</span>/<span id="totalTime">-</span>s
-                &nbsp; | &nbsp
-                Frame: <span id="currentFrame">-</span>/<span id="totalFrames">-</span>
-            </div>
+            Time: <span id="currentTime">-</span>/<span id="totalTime">-</span>s
+            &nbsp; | &nbsp
+            Frame: <span id="currentFrame">-</span>/<span id="totalFrames">-</span>
+        </div>
 
         <script type="module">
             import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
@@ -187,8 +193,8 @@
                 await Dexie.delete(name)
                 db = new Dexie(name)
                 db.version(1).stores({
-                    annotations: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
-                    videoMetadata: "id"
+                    markers: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
+                    videoInfo: "id"
                 })
 
                 // mediabunny: input + track
@@ -222,12 +228,12 @@
                 })
 
                 // Store metadata (timestamps included) as a single object
-                await db.videoMetadata.clear()
-                await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
+                await db.videoInfo.clear()
+                await db.videoInfo.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, nFrames: frameTimes.length })
 
                 // reactive markers
                 sub?.unsubscribe?.()
-                sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
+                sub = liveQuery(() => db.markers.toArray()).subscribe(renderMarkers)
 
 
                 $('#totalFrames').textContent = frameTimes.length
@@ -242,7 +248,6 @@
                 const first = (await iter.next()).value
                 console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
             }
-
 
             // Render a frame using CanvasSink by starting an iterator at the target timestamp
             /*async function drawFrame() {
@@ -263,8 +268,8 @@
                     const m = document.createElement('div')
                     m.className = 'marker'
                     // Convert from source pixels to displayed CSS pixels
-                    m.style.left = (a.x*100) + '%'
-                    m.style.top = (a.y*100) + '%'
+                    m.style.left = (a.x * 100) + '%'
+                    m.style.top = (a.y * 100) + '%'
                     m.title = a.marker || '?'
                     overlay.appendChild(m)
 
@@ -280,8 +285,8 @@
                     const deleteButton = document.createElement('button')
                     deleteButton.textContent = 'Delete'
                     deleteButton.onclick = async () => {
-                        await db.annotations.delete([a.time, a.x, a.y, a.marker, a.insertedAt])
-                        await renderMarkers(await db.annotations.toArray())
+                        await db.markers.delete([a.time, a.x, a.y, a.marker, a.insertedAt])
+                        await renderMarkers(await db.markers.toArray())
                     }
                     actionCell.appendChild(deleteButton)
                     row.appendChild(markerCell)
@@ -296,10 +301,10 @@
             const addAnnotation = async (marker) => {
                 if (!ready) return
                 const rect = frameCanvas.getBoundingClientRect()
-                const x = (mouseX - rect.left)/rect.width
-                const y = (mouseY - rect.top)/rect.height
+                const x = (mouseX - rect.left) / rect.width
+                const y = (mouseY - rect.top) / rect.height
                 const time = frameTimes[currentFrame]
-                await db.annotations.put({
+                await db.markers.put({
                     time,
                     x, y,
                     marker,
@@ -307,7 +312,7 @@
                     insertedAt: new Date().toISOString()
                 })
                 // re-render markers immediately for snappier UX
-                //await renderMarkers(await db.annotations.toArray())
+                //await renderMarkers(await db.markers.toArray())
             }
 
             let rendering = false
@@ -319,7 +324,7 @@
                 ctx.drawImage(c.canvas, 0, 0)
                 renderedFrame = target
                 //console.log("Rendered frame", { renderedFrame, t })
-                await renderMarkers(await db.annotations.toArray())
+                await renderMarkers(await db.markers.toArray())
             }
 
             async function pumpRender() {
@@ -376,6 +381,46 @@
 
                 if (/^[a-z0-9]$/.test(e.key)) {
                     addAnnotation(e.key)
+                }
+            })
+
+            const downloadMarkers = async () => {
+                if (!db) return;
+
+                const videoInfo = await db.videoInfo.toArray()
+                const markers = await db.markers.orderBy('time').toArray()
+
+                const dump = { videoInfo, markers }
+
+                const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = db.name + ".json"
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+            $("#saveMarkers").addEventListener('click', downloadMarkers)
+
+            $("#doLoadMarkers").addEventListener('change', async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const data = JSON.parse(e.target.result);
+                        await db.markers.bulkPut(data.markers);
+                    };
+                    reader.readAsText(file);
+                }
+
+                event.target.value = ""
+            })
+
+            $("#clearMarkers").addEventListener('click', async () => {
+                if(confirm("Clear all markers? This can't be undone.")) {
+                    await db.markers.clear()
                 }
             })
         </script>
