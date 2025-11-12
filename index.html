@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Minimal Video Annotator (Mediabunny + Dexie)</title>
+<title>Hypercatatoniavideonaxu</title>
 
 <style>
     :root {
@@ -34,33 +34,46 @@
         border-bottom: 1px solid #e5e5e5;
     }
 
-    #stageWrap {
-        flex: 1;
-        min-height: 0;
-        /* allow child to size */
-    }
+    #video {
 
-    #stage {
+        flex: 1 1 0;
         position: relative;
         width: 100%;
         height: 100%;
-        display: grid;
-        place-items: start center;
-        background: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        background: #000;
     }
 
-    /* The render surface fills available size, preserving source pixel mapping via CSS scaling */
-    #frame {
-        display: block;
-        background: #000;
+    #frameContainer {
+        /* The aspect ratio of this will be
+           defined later using the video dimensions */
+        aspect-ratio: 16 / 9;
+        position: absolute;
+        inset: 0;
+        margin: auto;
         max-width: 100%;
         max-height: 100%;
     }
 
+    #frame,
     #overlay {
         position: absolute;
-        inset: 0;
+        width: 100%;
+        height: 100%;
         pointer-events: none;
+    }
+
+    #frame {
+        background: black;
+        object-fit: contain;
+    }
+
+    #overlay {
+        pointer-events: none;
+        z-index: 1;
     }
 
     .marker {
@@ -81,8 +94,8 @@
             <span id="info" style="margin-left:auto; opacity:.75"></span>
         </div>
 
-        <div id="stageWrap">
-            <div id="stage">
+        <div id="video">
+            <div id="frameContainer">
                 <canvas id="frame"></canvas>
                 <div id="overlay"></div>
             </div>
@@ -171,7 +184,6 @@
             // draw first frame
             currentFrame = 0
             pumpRender()
-            layoutOverlay()
             info.textContent = `frames: ${frameTimes.length}  size: ${width}×${height}`
 
             // enable interactions
@@ -184,20 +196,6 @@
             console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
         }
 
-        // Keep overlay sized/aligned to the canvas box inside the stage
-        function layoutOverlay() {
-            // overlay sits on top of the canvas within #stage; stretch it to canvas CSS size
-            const rect = frameCanvas.getBoundingClientRect()
-            const stageRect = document.getElementById('stage').getBoundingClientRect()
-            // Position overlay relative to stage
-            overlay.style.position = 'absolute'
-            overlay.style.left = (rect.left - stageRect.left) + 'px'
-            overlay.style.top = (rect.top - stageRect.top) + 'px'
-            overlay.style.width = rect.width + 'px'
-            overlay.style.height = rect.height + 'px'
-            overlay.style.pointerEvents = ready ? 'auto' : 'none'
-        }
-        addEventListener('resize', layoutOverlay)
 
         // Render a frame using CanvasSink by starting an iterator at the target timestamp
         /*async function drawFrame() {
@@ -252,7 +250,7 @@
             if (!ready || rendering) return
             console.log("Pumping render", { ready, rendering, currentFrame })
 
-            
+
             rendering = true
             const target = currentFrame
             try {
@@ -273,7 +271,7 @@
         const setFrame = (n) => {
             if (!ready) return
             currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
-            
+
             pumpRender()
         }
 
