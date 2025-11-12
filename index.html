@@ -104,6 +104,8 @@
 <body>
     <div id="app">
         <div id="toolbar">
+            <button id="prevMarkerFrame">Prev</button>
+            <button id="nextMarkerFrame">Next</button>
             <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
             <input type="file" id="file" accept="video/*" style="display:none;">
             <label for="file" id="fileLabel"
@@ -261,9 +263,9 @@
                     const m = document.createElement('div')
                     m.className = 'marker'
                     // Convert from source pixels to displayed CSS pixels
-                    m.style.left = (a.x / width * rect.width) + 'px'
-                    m.style.top = (a.y / height * rect.height) + 'px'
-                    m.title = a.label || ''
+                    m.style.left = (a.x*100) + '%'
+                    m.style.top = (a.y*100) + '%'
+                    m.title = a.marker || '?'
                     overlay.appendChild(m)
 
                     // Add to marker table
@@ -294,8 +296,8 @@
             const addAnnotation = async (marker) => {
                 if (!ready) return
                 const rect = frameCanvas.getBoundingClientRect()
-                const x = (mouseX - rect.left) * (width / rect.width)
-                const y = (mouseY - rect.top) * (height / rect.height)
+                const x = (mouseX - rect.left)/rect.width
+                const y = (mouseY - rect.top)/rect.height
                 const time = frameTimes[currentFrame]
                 await db.annotations.put({
                     time,
@@ -353,10 +355,24 @@
 
             const stepFrames = (n) => setFrame(currentFrame + n)
 
+            const wheelSeek = (e => {
+                if (!ready) return
+                if (e.deltaY < 0) stepFrames(1)
+                if (e.deltaY > 0) stepFrames(-1)
+                e.preventDefault()
+            })
+
+            $('#video').addEventListener('wheel', wheelSeek)
+            $('#frameSlider').addEventListener('wheel', wheelSeek)
+
             document.addEventListener('keydown', (e) => {
                 if (!ready) return
                 if (e.key === 'ArrowLeft') stepFrames(-1)
                 if (e.key === 'ArrowRight') stepFrames(1)
+                if (e.key === ' ') {
+                    e.preventDefault()
+                    stepFrames(1)
+                }
 
                 if (/^[a-z0-9]$/.test(e.key)) {
                     addAnnotation(e.key)
