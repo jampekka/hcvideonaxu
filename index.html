@@ -406,6 +406,30 @@
                 }
             })
 
+            const seekNextMarker = async () => {
+                const nextMarker = await db.markers
+                    .where('frame')
+                    .above(currentFrame)
+                    .first();
+                
+                if(nextMarker) {
+                    setFrame(nextMarker.frame)
+                }
+            }
+            $("#nextMarkerFrame").addEventListener("click", seekNextMarker)
+
+            const seekPrevMarker = async () => {
+                const prevMarker = await db.markers
+                    .where('frame')
+                    .below(currentFrame)
+                    .last();
+
+                if(prevMarker) {
+                    setFrame(prevMarker.frame)
+                }
+            }
+            $("#prevMarkerFrame").addEventListener("click", seekPrevMarker)
+
             const downloadMarkers = async () => {
                 if (!db) return;
 
