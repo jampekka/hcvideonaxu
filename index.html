@@ -90,8 +90,11 @@
 <body>
     <div id="app">
         <div id="toolbar">
-            <input type="file" id="file" accept="video/*">
-            <span id="info" style="margin-left:auto; opacity:.75"></span>
+            <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
+            <input type="file" id="file" accept="video/*" style="display:none;">
+            <label for="file" id="fileLabel" style="padding:8px 16px; background:#eee; border-radius:4px; cursor:pointer;">
+                Select Video
+            </label>
         </div>
 
         <div id="video">
@@ -99,6 +102,12 @@
                 <canvas id="frame"></canvas>
                 <div id="overlay"></div>
             </div>
+        </div>
+
+        <div id="status">
+            Time: <span id="currentTime">-</span>/<span id="totalTime">-</span>s
+            &nbsp; | &nbsp
+            Frame: <span id="currentFrame">-</span>/<span id="totalFrames">-</span>
         </div>
     </div>
 
@@ -173,6 +182,14 @@
 
             frameTimes.sort((a, b) => a - b)
 
+            const frameSlider = $('#frameSlider')
+            frameSlider.max = frameTimes.length - 1
+            frameSlider.disabled = false
+
+            frameSlider.addEventListener('input', (e) => {
+                setFrame(Number(e.target.value))
+            })
+
             // Store metadata (timestamps included) as a single object
             await db.videoMetadata.clear()
             await db.videoMetadata.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, frameTimes })
@@ -181,13 +198,12 @@
             sub?.unsubscribe?.()
             sub = liveQuery(() => db.annotations.toArray()).subscribe(renderMarkers)
 
-            // draw first frame
-            currentFrame = 0
-            pumpRender()
-            info.textContent = `frames: ${frameTimes.length}  size: ${width}×${height}`
+            
+            $('#totalFrames').textContent = frameTimes.length
+            $('#totalTime').textContent = (frameTimes.at(-1)).toFixed(2)
 
-            // enable interactions
             ready = true
+            setFrame(0)
 
             // --- minimal sanity tests ---
             console.assert(frameTimes.length > 0, 'No frame timestamps collected')
@@ -271,7 +287,8 @@
         const setFrame = (n) => {
             if (!ready) return
             currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
-
+            $('#currentFrame').textContent = currentFrame
+            $('#currentTime').textContent = (frameTimes[currentFrame] ?? 0).toFixed(2)
             pumpRender()
         }
 
