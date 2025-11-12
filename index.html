@@ -171,7 +171,7 @@
                 frameTimes.push(pkt.timestamp)
             }
 
-            frameTimes.sort()
+            frameTimes.sort((a, b) => a - b)
 
             // Store metadata (timestamps included) as a single object
             await db.videoMetadata.clear()
