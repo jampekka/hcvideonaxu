@@ -258,13 +258,13 @@
             ctx.clearRect(0, 0, frameCanvas.width, frameCanvas.height)
             ctx.drawImage(c.canvas, 0, 0)
             renderedFrame = target
-            console.log("Rendered frame", { renderedFrame, t })
+            //console.log("Rendered frame", { renderedFrame, t })
             await renderMarkers(await db.annotations.toArray())
         }
 
         async function pumpRender() {
             if (!ready || rendering) return
-            console.log("Pumping render", { ready, rendering, currentFrame })
+            //console.log("Pumping render", { ready, rendering, currentFrame })
 
 
             rendering = true
@@ -278,7 +278,7 @@
 
             // If the desired frame changed while we were rendering, render again.
             if (currentFrame !== target) {
-                console.log("Repumping", { target, renderedFrame, currentFrame })
+                //console.log("Repumping", { target, renderedFrame, currentFrame })
                 pumpRender()
             }
         }
