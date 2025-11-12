@@ -13,10 +13,23 @@
     body {
         height: 100%;
         margin: 0;
+        color: white;
     }
 
     body {
         font-family: system-ui, sans-serif;
+    }
+
+    #introScreen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background-color: black;
     }
 
     /* App layout: toolbar on top, stage fills the rest */
@@ -114,19 +127,29 @@
         pointer-events: none;
         user-select: none;
     }
+
+    label, button {
+        background: #eee;
+        color: black;
+        border-radius: 4px;
+        cursor: pointer;
+        padding: 8px 16px;
+    }
 </style>
 
 <body>
+    <div id="introScreen">
+        <h1>Hypercatatoniavideonaxu!</h1>
+        <input type="file" id="file" accept="video/*" style="display:none;">
+        <label for="file" id="fileLabel">
+            Select Video
+        </label>
+    </div>
     <div id="app">
         <div id="toolbar">
             <button id="prevMarkerFrame">Prev</button>
             <button id="nextMarkerFrame">Next</button>
             <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
-            <input type="file" id="file" accept="video/*" style="display:none;">
-            <label for="file" id="fileLabel"
-                style="padding:8px 16px; background:#eee; border-radius:4px; cursor:pointer;">
-                Select Video
-            </label>
             <button id="saveMarkers">Save markers</button>
 
             <input type="file" id="doLoadMarkers" accept="application/json" style="display:none" />
@@ -202,6 +225,7 @@
             // ------------------------------
             fileInput.onchange = async (e) => {
                 const file = e.target.files[0]
+                $("#introScreen").style.display = "none"
 
                 // fresh DB each run (dev). Remove Dexie.delete for persistence.
                 const name = dbNameFor(file)
@@ -411,8 +435,8 @@
                     .where('frame')
                     .above(currentFrame)
                     .first();
-                
-                if(nextMarker) {
+
+                if (nextMarker) {
                     setFrame(nextMarker.frame)
                 }
             }
@@ -424,7 +448,7 @@
                     .below(currentFrame)
                     .last();
 
-                if(prevMarker) {
+                if (prevMarker) {
                     setFrame(prevMarker.frame)
                 }
             }
