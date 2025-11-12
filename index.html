@@ -156,7 +156,7 @@
             await Dexie.delete(name)
             db = new Dexie(name)
             db.version(1).stores({
-                annotations: "[timeSec+x+y+label+insertedAt], frame, timeSec, x, y, label, insertedAt",
+                annotations: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
                 videoMetadata: "id"
             })
 
@@ -227,7 +227,7 @@
             const rect = frameCanvas.getBoundingClientRect()
             const t = frameTimes[currentFrame] ?? 0
             for (const a of anns) {
-                if (Math.abs(a.timeSec - t) > 1e-6) continue
+                if (Math.abs(a.time - t) > 1e-6) continue
                 const m = document.createElement('div')
                 m.className = 'marker'
                 // Convert from source pixels to displayed CSS pixels
@@ -244,8 +244,13 @@
             const rect = frameCanvas.getBoundingClientRect()
             const x = (mouseX - rect.left) * (width / rect.width)
             const y = (mouseY - rect.top) * (height / rect.height)
-            const timeSec = frameTimes[currentFrame]
-            await db.annotations.put({ frame: currentFrame, timeSec, x, y, marker, insertedAt: new Date().toISOString() })
+            const time = frameTimes[currentFrame]
+            await db.annotations.put({
+                time,
+                x, y,
+                marker,
+                frame: currentFrame,
+                insertedAt: new Date().toISOString() })
             // re-render markers immediately for snappier UX
             //await renderMarkers(await db.annotations.toArray())
         }
