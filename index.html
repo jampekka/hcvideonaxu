@@ -92,12 +92,27 @@
 
     .marker {
         position: absolute;
+        opacity: 0.5;
         width: 8px;
         height: 8px;
-        background: red;
+        background: black;
+        border: 3px solid white;
         border-radius: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
+    }
+
+    .marker-label {
+        position: absolute;
+        right: -16px;
+        bottom: -12px;
+        font-size: 14px;
+        color: white;
+        text-shadow: 2px 2px 0px black;
+        border-radius: 3px;
+        padding: 0 2px;
+        pointer-events: none;
+        user-select: none;
     }
 </style>
 
@@ -190,7 +205,7 @@
 
                 // fresh DB each run (dev). Remove Dexie.delete for persistence.
                 const name = dbNameFor(file)
-                await Dexie.delete(name)
+                //await Dexie.delete(name)
                 db = new Dexie(name)
                 db.version(1).stores({
                     markers: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
@@ -270,7 +285,12 @@
                     // Convert from source pixels to displayed CSS pixels
                     m.style.left = (a.x * 100) + '%'
                     m.style.top = (a.y * 100) + '%'
-                    m.title = a.marker || '?'
+                    //m.title = a.marker || '?'
+
+                    const letter = document.createElement('span')
+                    letter.className = 'marker-label'
+                    letter.textContent = a.marker
+                    m.appendChild(letter)
                     overlay.appendChild(m)
 
                     // Add to marker table
@@ -372,6 +392,8 @@
 
             document.addEventListener('keydown', (e) => {
                 if (!ready) return
+                if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return; // Skip if any modifier is pressed
+
                 if (e.key === 'ArrowLeft') stepFrames(-1)
                 if (e.key === 'ArrowRight') stepFrames(1)
                 if (e.key === ' ') {
@@ -419,7 +441,7 @@
             })
 
             $("#clearMarkers").addEventListener('click', async () => {
-                if(confirm("Clear all markers? This can't be undone.")) {
+                if (confirm("Clear all markers? This can't be undone.")) {
                     await db.markers.clear()
                 }
             })
