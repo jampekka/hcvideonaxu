@@ -146,6 +146,30 @@
         font-family: monospace;
         font-size: 1.5em;
     }
+
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type=number] {
+        -moz-appearance: textfield;
+        text-align: right;
+        width: 6em;
+        min-width: 6em;
+    }
+
+    input[type=number] {
+        appearance: textfield;
+    }
+
+    form {
+        display: contents;
+        margin: 0;
+        padding: 0;
+        border: none;
+    }
 </style>
 
 <body>
@@ -160,8 +184,12 @@
         <div id="toolbar">
 
             <div class="posIndicators">
-                <div><span id="currentTime">0.00</span>s</div>
-                <div><span id="currentFrame">0</span>&nbsp;</div>
+                <div>
+                    <form id="timeForm"><input type="number" id="currentTime" value="0.00" step="0.01"></form>s
+                </div>
+                <div>
+                    <form id="frameForm"><input type="number" id="currentFrame" value="0" step="1"></form>&nbsp
+                </div>
             </div>
 
             <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
@@ -414,8 +442,8 @@
             const setFrame = (n) => {
                 if (!ready) return
                 currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
-                $('#currentFrame').textContent = currentFrame
-                $('#currentTime').textContent = (frameTimes[currentFrame] ?? 0).toFixed(2)
+                $('#currentFrame').value = currentFrame
+                $('#currentTime').value = (frameTimes[currentFrame] ?? 0).toFixed(2)
                 pumpRender()
             }
 
@@ -435,6 +463,9 @@
             document.addEventListener('keydown', (e) => {
                 if (!ready) return
                 if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return; // Skip if any modifier is pressed
+
+                const active = document.activeElement;
+                if (active && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
 
                 if (e.key === 'ArrowLeft') stepFrames(-1)
                 if (e.key === 'ArrowRight') stepFrames(1)
@@ -471,6 +502,33 @@
                 }
             }
             $("#prevMarkerFrame").addEventListener("click", seekPrevMarker)
+
+            $("#timeForm").addEventListener("submit", (e) => {
+                e.preventDefault();
+                const t = Number($("#currentTime").value);
+                if (!isNaN(t) && frameTimes.length > 0) {
+                    let closest = 0;
+                    let minDiff = Math.abs(frameTimes[0] - t);
+                    for (let i = 1; i < frameTimes.length; ++i) {
+                        const diff = Math.abs(frameTimes[i] - t);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closest = i;
+                        }
+                    }
+                    $("#currentTime").blur();
+                    setFrame(closest);
+                }
+            });
+
+            $("#frameForm").addEventListener("submit", (e) => {
+                e.preventDefault()
+                const frame = Number($("#currentFrame").value)
+                if(!isNaN(frame)) {
+                    $("#currentFrame").blur()
+                    setFrame(frame)
+                }
+            });
 
             const downloadMarkers = async () => {
                 if (!db) return;
