@@ -116,6 +116,25 @@
         z-index: 1;
     }
 
+    #seekingOverlay {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3em;
+        color: white;
+        pointer-events: none;
+    }
+
+    #seekingOverlay.visible {
+        opacity: 1;
+        transition: opacity 0.2s linear 0.2s;
+    }
+
     .marker {
         position: absolute;
         opacity: 0.5;
@@ -270,6 +289,7 @@
                 <div id="frameContainer">
                     <canvas id="frame"></canvas>
                     <div id="overlay"></div>
+                    <div id="seekingOverlay">Seeking</div>
                 </div>
             </div>
             <table id="markerTable">
@@ -526,10 +546,11 @@
             }
 
             // TODO: Indicate rendered vs target frame in UI
+            const seekingOverlay = $('#seekingOverlay')
             async function pumpRender() {
                 if (!ready || rendering) return
                 //console.log("Pumping render", { ready, rendering, currentFrame })
-
+                seekingOverlay.classList.add("visible");
 
                 rendering = true
                 const target = currentFrame
@@ -544,7 +565,11 @@
                 if (currentFrame !== target) {
                     //console.log("Repumping", { target, renderedFrame, currentFrame })
                     pumpRender()
+                } else {
+                    seekingOverlay.classList.remove("visible");
                 }
+
+
             }
 
 
