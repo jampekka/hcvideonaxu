@@ -21,7 +21,8 @@
         font-family: system-ui, sans-serif;
     }
 
-    #introScreen, #loadingScreen {
+    #introScreen,
+    #loadingScreen {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -235,6 +236,7 @@
         <label for="file" id="fileLabel">
             Select Video
         </label>
+        <a id="downloadAllSessions" style="color: white; opacity: 0.7; margin: 3em;" href="#">Download all sessions</a>
     </div>
     <div id="loadingScreen">
         <h1>Loading...</h1>
@@ -306,6 +308,7 @@
         <script type="module">
             import { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, CanvasSink } from "https://esm.sh/mediabunny@latest"
             import Dexie, { liveQuery } from "https://esm.sh/dexie@3"
+            import JSZip from "https://esm.sh/jszip@3.10.1"
 
             // ------------------------------
             // minimal helpers
@@ -319,7 +322,12 @@
             const markerTableBody = $('#markerTableBody')
             const ctx = frameCanvas.getContext('2d')
 
-            const dbNameFor = (file) => `hcvnaxu-${file.name}:${file.size}:${file.lastModified}`
+            const dbNameFor = (file) => `hcvnaxu-${file.name}_${file.size}_${file.lastModified}`
+
+            const dbSchema = {
+                markers: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
+                videoInfo: "id"
+            }
 
             // runtime state (per loaded file)
             let db, sub, input, vtrack, cSink
@@ -351,10 +359,7 @@
                 const name = dbNameFor(file)
                 //await Dexie.delete(name)
                 db = new Dexie(name)
-                db.version(1).stores({
-                    markers: "[time+x+y+marker+insertedAt], frame, time, x, y, marker, insertedAt",
-                    videoInfo: "id"
-                })
+                db.version(1).stores(dbSchema)
 
                 // mediabunny: input + track
                 input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) })
@@ -390,7 +395,7 @@
                 }
 
                 // FPS stats
-                let frameFpss = frameTimes.slice(1).map((t, i) => 1/(t - frameTimes[i]));
+                let frameFpss = frameTimes.slice(1).map((t, i) => 1 / (t - frameTimes[i]));
                 frameFpss.sort((a, b) => a - b);
                 const fpsMedian = quantile(frameFpss, 0.5);
                 const fpsIqr = (quantile(frameFpss, 0.75) - quantile(frameFpss, 0.25));
@@ -685,14 +690,53 @@
                 }
             })
 
-            // TODO: Download all markers as JSON
-            const downloadMarkers = async () => {
-                if (!db) return;
-
+            const dumpDb = async (db) => {
                 const videoInfo = await db.videoInfo.toArray()
                 const markers = await db.markers.orderBy('time').toArray()
 
-                const dump = { videoInfo, markers }
+                return { videoInfo, markers }
+            }
+
+            async function downloadAllSessions() {
+                const dbs = await indexedDB.databases();
+                const zip = new JSZip();
+
+                for (const dbInfo of dbs) {
+                    const dbName = dbInfo.name;
+                    if (!dbName) continue;
+                    if (!dbName.startsWith("hcvnaxu-")) continue;
+                    try {
+                        const db = new Dexie(dbName)
+                        db.version(1).stores(dbSchema)
+                        await db.open()
+                        const dump = await dumpDb(db)
+                        zip.file(`${dbName}.json`, JSON.stringify(dump, null, 2));
+                        db.close();
+                    } catch (e) {
+                        console.warn("Failed to export", dbName, e);
+                    }
+                }
+
+                const blob = await zip.generateAsync({ type: "blob" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "hcvideonaxu-dump.zip";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+            $("#downloadAllSessions").addEventListener('click', (e) => {
+                e.preventDefault();
+                downloadAllSessions();
+            });
+
+
+            const downloadMarkers = async () => {
+                if (!db) return;
+
+                const dump = await dumpDb(db)
 
                 const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
