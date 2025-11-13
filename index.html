@@ -62,6 +62,12 @@
         align-self: flex-start;
     }
 
+    #markerTable th, #markerTable td {
+        border-top: 1px solid #222;
+        padding: 2px 4px;
+        min-width: 6ch;
+    }
+
     #video {
         flex: 1 1 0;
         position: relative;
@@ -423,7 +429,7 @@
                     yCell.textContent = a.y.toFixed(2)
                     const actionCell = document.createElement('td')
                     const deleteButton = document.createElement('button')
-                    deleteButton.textContent = 'Delete'
+                    deleteButton.textContent = '🗑'
                     deleteButton.onclick = async () => {
                         await db.markers.delete([a.time, a.x, a.y, a.marker, a.insertedAt])
                         await renderMarkers(await db.markers.toArray())
@@ -439,6 +445,7 @@
 
             function renderMarkerBar(anns) {
                 const bar = $('#frameSliderBar')
+                bar.querySelectorAll('.frameSliderMarker').forEach(el => el.remove());
                 const frameWidth = (1/frameTimes.length)*100 + '%'
                 const frames = new Set(anns.map(m => m.frame))
                 for(const frame of frames) {
