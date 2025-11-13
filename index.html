@@ -145,22 +145,23 @@
         text-align: right;
         font-family: monospace;
         font-size: 1.5em;
+        white-space: nowrap;
     }
 
-    input::-webkit-outer-spin-button,
-    input::-webkit-inner-spin-button {
+    input.rawnumber::-webkit-outer-spin-button,
+    input.rawnumber::-webkit-inner-spin-button {
         -webkit-appearance: none;
         margin: 0;
     }
 
-    input[type=number] {
+    input.rawnumber[type=number] {
         -moz-appearance: textfield;
         text-align: right;
         width: 6em;
         min-width: 6em;
     }
 
-    input[type=number] {
+    input.rawnumber[type=number] {
         appearance: textfield;
     }
 
@@ -169,6 +170,41 @@
         margin: 0;
         padding: 0;
         border: none;
+    }
+
+    #frameSlider {
+        cursor: text;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    #frameSliderBar {
+        position: relative;
+        display: flex;
+        align-items: center;
+        border: 2px solid #ccc;
+        height: 8px;
+        width: 100%;
+    }
+
+    #frameCursor {
+        position: absolute;
+        height: 24px;
+        width: 2px;
+        background-color: #ccc;
+        will-change: left;
+    }
+
+    #status {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--m);
+        border-top: 1px solid #222;
+        font-size: 0.9em;
     }
 </style>
 
@@ -182,17 +218,23 @@
     </div>
     <div id="app">
         <div id="toolbar">
-
             <div class="posIndicators">
                 <div>
-                    <form id="timeForm"><input type="number" id="currentTime" value="0.00" step="0.01"></form>s
+                    <form id="timeForm"><input class="rawnumber" type="number" id="currentTime" value="0.00"
+                            step="0.01"></form>s
                 </div>
                 <div>
-                    <form id="frameForm"><input type="number" id="currentFrame" value="0" step="1"></form>&nbsp
+                    <form id="frameForm"><input class="rawnumber" type="number" id="currentFrame" value="0" step="1">
+                    </form>&nbsp
                 </div>
             </div>
 
-            <input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>
+            <!--<input type="range" id="frameSlider" min="0" max="0" value="0" style="flex:1;" disabled>-->
+            <div id="frameSlider">
+                <div id="frameSliderBar">
+                    <div id="frameCursor"></div>
+                </div>
+            </div>
             <button id="prevMarkerFrame">Prev</button>
             <button id="nextMarkerFrame">Next</button>
             <div class=""></div>
@@ -220,15 +262,21 @@
             </table>
         </div>
         <div id="status">
-            Duration: <span id="totalTime">-</span>s
-            &nbsp; | &nbsp
-            Total frames: <span id="totalFrames">-</span>
-            <button id="saveMarkers">Save markers</button>
-            <input type="file" id="doLoadMarkers" accept="application/json" style="display:none" />
-            <label for="doLoadMarkers" id="loadMarkers">Load markers</label>
+            <div>
+                Duration: <span id="totalTime">-</span>s
+                &nbsp; | &nbsp
+                Total frames: <span id="totalFrames">-</span>
+            </div>
+            <div style="display: flex; flex-direction: row;">
+                <div style="white-space: nowrap; display: flex; align-items: center;">Min seek dt &nbsp;<input
+                        id="minSeekDt" style="width: 8ch" type="number" value="0" step="0.1" /></div>
+                <button id="saveMarkers">Save markers</button>
+                <input type="file" id="doLoadMarkers" accept="application/json" style="display:none" />
+                <label for="doLoadMarkers" id="loadMarkers">Load markers</label>
 
-            <button id="clearMarkers">Clear markers</button>
-            <button id="newSession" onclick="location.reload()">New session</button>
+                <button id="clearMarkers">Clear markers</button>
+                <button id="newSession" onclick="location.reload()">New session</button>
+            </div>
         </div>
 
         <script type="module">
@@ -254,6 +302,7 @@
             let width = 0, height = 0
             let currentFrame = 0
             let pendingFrame = 0
+            let minSeekDt = 0
             let frameTimes = [] // list of timestamps (seconds) from EncodedPacketSink (metadataOnly)
             let ready = false
 
@@ -273,7 +322,6 @@
                 const file = e.target.files[0]
                 $("#introScreen").style.display = "none"
 
-                // fresh DB each run (dev). Remove Dexie.delete for persistence.
                 const name = dbNameFor(file)
                 //await Dexie.delete(name)
                 db = new Dexie(name)
@@ -303,14 +351,6 @@
                 }
 
                 frameTimes.sort((a, b) => a - b)
-
-                const frameSlider = $('#frameSlider')
-                frameSlider.max = frameTimes.length - 1
-                frameSlider.disabled = false
-
-                frameSlider.addEventListener('input', (e) => {
-                    setFrame(Number(e.target.value))
-                })
 
                 // Store metadata (timestamps included) as a single object
                 await db.videoInfo.clear()
@@ -417,6 +457,7 @@
                 await renderMarkers(await db.markers.toArray())
             }
 
+            // TODO: Indicate rendered vs target frame in UI
             async function pumpRender() {
                 if (!ready || rendering) return
                 //console.log("Pumping render", { ready, rendering, currentFrame })
@@ -444,21 +485,63 @@
                 currentFrame = Math.min(Math.max(0, n), frameTimes.length - 1)
                 $('#currentFrame').value = currentFrame
                 $('#currentTime').value = (frameTimes[currentFrame] ?? 0).toFixed(2)
+                // TODO: Should do with time
+                const relFrame = currentFrame / frameTimes.length
+                const sliderWidth = $('#frameSliderBar').clientWidth
+                // TODO: Aligns to right of the cursor
+                $('#frameCursor').style.left = `${Math.floor(relFrame * sliderWidth)}px`
                 pumpRender()
             }
 
+            const frameAt = (t) => {
+                if(t <= frameTimes[0]) return 0
+                if(t >= frameTimes[frameTimes.length - 1]) return frameTimes.length - 1
+                let lo = 0, hi = frameTimes.length - 1, result = -1
+                while (lo <= hi) {
+                    const mid = Math.floor((lo + hi) / 2)
+                    if (frameTimes[mid] <= t) {
+                        result = mid
+                        lo = mid + 1
+                    } else {
+                        hi = mid - 1
+                    }
+                }
+                return result
+            }
 
             const stepFrames = (n) => setFrame(currentFrame + n)
+            const stepDts = (n) => {
+                if (!ready) return
+                const currentTime = frameTimes[currentFrame] ?? 0
+                const targetTime = currentTime + n * minSeekDt
+                let targetFrame = frameAt(targetTime)
+
+                if(targetFrame === currentFrame) {
+                    // Need to step at least one frame in the desired direction
+                    targetFrame = currentFrame + Math.sign(n)
+                }
+                
+                setFrame(targetFrame)
+
+            }
 
             const wheelSeek = (e => {
                 if (!ready) return
-                if (e.deltaY < 0) stepFrames(1)
-                if (e.deltaY > 0) stepFrames(-1)
+                if (e.deltaY < 0) stepDts(1)
+                if (e.deltaY > 0) stepDts(-1)
                 e.preventDefault()
             })
 
             $('#video').addEventListener('wheel', wheelSeek)
             $('#frameSlider').addEventListener('wheel', wheelSeek)
+            $('#frameSlider').addEventListener('click', (e) => {
+                const rect = e.target.getBoundingClientRect()
+                const x = e.clientX - rect.left
+                const relX = x / rect.width
+                const newFrame = Math.floor(relX * frameTimes.length)
+                setFrame(newFrame)
+            })
+            // TODO: Tooltip on frameSlider hover
 
             document.addEventListener('keydown', (e) => {
                 if (!ready) return
@@ -467,11 +550,11 @@
                 const active = document.activeElement;
                 if (active && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
 
-                if (e.key === 'ArrowLeft') stepFrames(-1)
-                if (e.key === 'ArrowRight') stepFrames(1)
+                if (e.key === 'ArrowLeft') stepDts(-1)
+                if (e.key === 'ArrowRight') stepDts(1)
                 if (e.key === ' ') {
                     e.preventDefault()
-                    stepFrames(1)
+                    stepDts(1)
                 }
 
                 if (/^[a-z0-9]$/.test(e.key)) {
@@ -524,11 +607,20 @@
             $("#frameForm").addEventListener("submit", (e) => {
                 e.preventDefault()
                 const frame = Number($("#currentFrame").value)
-                if(!isNaN(frame)) {
+                if (!isNaN(frame)) {
                     $("#currentFrame").blur()
                     setFrame(frame)
                 }
             });
+
+            $("#minSeekDt").value = minSeekDt
+            // TODO: Handle error conditions
+            $("#minSeekDt").addEventListener("input", (e) => {
+                const val = Number(e.target.value)
+                if (!isNaN(val) && val >= 0) {
+                    minSeekDt = val
+                }
+            })
 
             const downloadMarkers = async () => {
                 if (!db) return;
