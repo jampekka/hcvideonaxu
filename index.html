@@ -21,7 +21,7 @@
         font-family: system-ui, sans-serif;
     }
 
-    #introScreen {
+    #introScreen, #loadingScreen {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -31,6 +31,10 @@
         width: 100%;
         height: 100%;
         background-color: black;
+    }
+
+    #loadingScreen {
+        z-index: 90;
     }
 
     /* App layout: toolbar on top, stage fills the rest */
@@ -62,7 +66,8 @@
         align-self: flex-start;
     }
 
-    #markerTable th, #markerTable td {
+    #markerTable th,
+    #markerTable td {
         border-top: 1px solid #222;
         padding: 2px 4px;
         min-width: 6ch;
@@ -231,6 +236,9 @@
             Select Video
         </label>
     </div>
+    <div id="loadingScreen">
+        <h1>Loading...</h1>
+    </div>
     <div id="app">
         <div id="toolbar">
             <div class="posIndicators">
@@ -277,10 +285,11 @@
             </table>
         </div>
         <div id="status">
-            <div>
-                Duration: <span id="totalTime">-</span>s
-                &nbsp; | &nbsp
-                Total frames: <span id="totalFrames">-</span>
+            <div style="white-space: nowrap;">
+                <span id="fileName"></span> |
+                Duration: <span id="totalTime">-</span>s |
+                Total frames: <span id="totalFrames">-</span> |
+                FPS: <span id="videoFpsMedian"></span>±<span id="videoFpsIqr"></span>
             </div>
             <div style="display: flex; flex-direction: row;">
                 <div style="white-space: nowrap; display: flex; align-items: center;">Min seek dt &nbsp;<input
@@ -310,7 +319,7 @@
             const markerTableBody = $('#markerTableBody')
             const ctx = frameCanvas.getContext('2d')
 
-            const dbNameFor = (file) => `va-${file.name}:${file.size}:${file.lastModified}`
+            const dbNameFor = (file) => `hcvnaxu-${file.name}:${file.size}:${file.lastModified}`
 
             // runtime state (per loaded file)
             let db, sub, input, vtrack, cSink
@@ -336,6 +345,8 @@
             fileInput.onchange = async (e) => {
                 const file = e.target.files[0]
                 $("#introScreen").style.display = "none"
+
+                $('#fileName').textContent = file.name
 
                 const name = dbNameFor(file)
                 //await Dexie.delete(name)
@@ -367,6 +378,25 @@
 
                 frameTimes.sort((a, b) => a - b)
 
+                function quantile(sortedArr, q) {
+                    const pos = (sortedArr.length - 1) * q;
+                    const base = Math.floor(pos);
+                    const rest = pos - base;
+                    if (sortedArr[base + 1] !== undefined) {
+                        return sortedArr[base] + rest * (sortedArr[base + 1] - sortedArr[base]);
+                    } else {
+                        return sortedArr[base];
+                    }
+                }
+
+                // FPS stats
+                let frameFpss = frameTimes.slice(1).map((t, i) => 1/(t - frameTimes[i]));
+                frameFpss.sort((a, b) => a - b);
+                const fpsMedian = quantile(frameFpss, 0.5);
+                const fpsIqr = (quantile(frameFpss, 0.75) - quantile(frameFpss, 0.25));
+                $('#videoFpsMedian').textContent = fpsMedian.toFixed(2)
+                $('#videoFpsIqr').textContent = fpsIqr.toFixed(2)
+
                 // Store metadata (timestamps included) as a single object
                 await db.videoInfo.clear()
                 await db.videoInfo.add({ id: "meta", width, height, duration: frameTimes.at(-1) ?? 0, nFrames: frameTimes.length })
@@ -387,6 +417,8 @@
                 const iter = cSink.canvases(frameTimes[0] ?? 0)
                 const first = (await iter.next()).value
                 console.assert(first && first.canvas, 'CanvasSink did not yield first frame')
+
+                $("#loadingScreen").style.display = "none";
             }
 
             // Render a frame using CanvasSink by starting an iterator at the target timestamp
@@ -446,9 +478,9 @@
             function renderMarkerBar(anns) {
                 const bar = $('#frameSliderBar')
                 bar.querySelectorAll('.frameSliderMarker').forEach(el => el.remove());
-                const frameWidth = (1/frameTimes.length)*100 + '%'
+                const frameWidth = (1 / frameTimes.length) * 100 + '%'
                 const frames = new Set(anns.map(m => m.frame))
-                for(const frame of frames) {
+                for (const frame of frames) {
                     const markerDiv = document.createElement('div')
                     markerDiv.className = 'frameSliderMarker'
                     const relPos = (frame / frameTimes.length) * 100
@@ -525,8 +557,8 @@
             }
 
             const frameAt = (t) => {
-                if(t <= frameTimes[0]) return 0
-                if(t >= frameTimes[frameTimes.length - 1]) return frameTimes.length - 1
+                if (t <= frameTimes[0]) return 0
+                if (t >= frameTimes[frameTimes.length - 1]) return frameTimes.length - 1
                 let lo = 0, hi = frameTimes.length - 1, result = -1
                 while (lo <= hi) {
                     const mid = Math.floor((lo + hi) / 2)
@@ -547,11 +579,11 @@
                 const targetTime = currentTime + n * minSeekDt
                 let targetFrame = frameAt(targetTime)
 
-                if(targetFrame === currentFrame) {
+                if (targetFrame === currentFrame) {
                     // Need to step at least one frame in the desired direction
                     targetFrame = currentFrame + Math.sign(n)
                 }
-                
+
                 setFrame(targetFrame)
 
             }
@@ -653,6 +685,7 @@
                 }
             })
 
+            // TODO: Download all markers as JSON
             const downloadMarkers = async () => {
                 if (!db) return;
 
