@@ -190,6 +190,15 @@
         width: 100%;
     }
 
+    .frameSliderMarker {
+        position: absolute;
+        height: 100%;
+        background-color: white;
+        opacity: 0.5;
+        pointer-events: none;
+        min-width: 1px;
+    }
+
     #frameCursor {
         position: absolute;
         height: 24px;
@@ -384,6 +393,7 @@
 
             // markers rendering (HTML/CSS)
             async function renderMarkers(anns) {
+                renderMarkerBar(anns)
                 overlay.innerHTML = ""
                 markerTableBody.innerHTML = ""
                 const rect = frameCanvas.getBoundingClientRect()
@@ -424,6 +434,20 @@
                     row.appendChild(yCell)
                     row.appendChild(actionCell)
                     markerTableBody.appendChild(row)
+                }
+            }
+
+            function renderMarkerBar(anns) {
+                const bar = $('#frameSliderBar')
+                const frameWidth = (1/frameTimes.length)*100 + '%'
+                const frames = new Set(anns.map(m => m.frame))
+                for(const frame of frames) {
+                    const markerDiv = document.createElement('div')
+                    markerDiv.className = 'frameSliderMarker'
+                    const relPos = (frame / frameTimes.length) * 100
+                    markerDiv.style.left = `${relPos}%`
+                    markerDiv.style.width = frameWidth
+                    bar.appendChild(markerDiv)
                 }
             }
 
