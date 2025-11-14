@@ -247,7 +247,8 @@
         font-size: 0.9em;
     }
 
-    body.seeking #currentTime, body.seeking #currentFrame {
+    body.seeking #currentTime,
+    body.seeking #currentFrame {
         background-color: orange;
         transition: background-color 0.3s linear 0.3s;
     }
@@ -804,12 +805,43 @@
             }
             $("#saveMarkers").addEventListener('click', downloadMarkers)
 
+            function loadOldMarkers(data) {
+                if (!db) return;
+                console.log(data);
+                const markers = data.markers || []
+
+                let rows = []
+                for (const markerFrame of markers) {
+                    const time = markerFrame.time
+                    const frame = frameAt(time)
+                    for (const m of markerFrame.markers) {
+                        rows.push({
+                            time,
+                            x: m.position[0],
+                            y: m.position[1],
+                            marker: m.name,
+                            frame,
+                            insertedAt: new Date().toISOString()
+                        })
+
+                        console.log(rows.at(-1))
+                    }
+                }
+
+                return db.markers.bulkPut(rows)
+            }
+
             $("#doLoadMarkers").addEventListener('change', async (event) => {
                 const file = event.target.files[0];
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = async (e) => {
                         const data = JSON.parse(e.target.result);
+                        if (!("videoInfo" in data)) {
+                            // Old format
+                            await loadOldMarkers(data);
+                            return;
+                        }
                         await db.markers.bulkPut(data.markers);
                     };
                     reader.readAsText(file);
