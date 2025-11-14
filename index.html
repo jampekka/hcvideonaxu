@@ -640,7 +640,7 @@
                 const currentMarkers = await db.markers
                     .where('frame').equals(currentFrame)
                     .toArray();
-                
+
                 if (currentMarkers.length === 0) return;
 
                 currentMarkers.sort((a, b) => new Date(b.insertedAt) - new Date(a.insertedAt));
@@ -661,7 +661,7 @@
 
                 if (e.key === 'ArrowLeft') stepDts(-1)
                 if (e.key === 'ArrowRight') stepDts(1)
-                if (e.key === ' ') {    
+                if (e.key === ' ') {
                     stepDts(1)
                 }
                 if (e.key === 'Backspace' || e.key === 'Delete') {
@@ -732,6 +732,12 @@
                     minSeekDt = val
                 }
             })
+
+            $("#minSeekDt").addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.target.blur();
+                }
+            });
 
             const dumpDb = async (db) => {
                 const videoInfo = await db.videoInfo.toArray()
