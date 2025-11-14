@@ -289,7 +289,7 @@
                 <div id="frameContainer">
                     <canvas id="frame"></canvas>
                     <div id="overlay"></div>
-                    <div id="seekingOverlay">Seeking</div>
+                    <!-- <div id="seekingOverlay">Seeking</div> -->g
                 </div>
             </div>
             <table id="markerTable">
@@ -340,6 +340,7 @@
             const frameCanvas = $('#frame')
             const overlay = $('#overlay')
             const markerTableBody = $('#markerTableBody')
+            const body = $('body')
             const ctx = frameCanvas.getContext('2d')
 
             const dbNameFor = (file) => `hcvnaxu-${file.name}_${file.size}_${file.lastModified}`
@@ -545,12 +546,11 @@
                 await renderMarkers(await db.markers.toArray())
             }
 
-            // TODO: Indicate rendered vs target frame in UI
             const seekingOverlay = $('#seekingOverlay')
             async function pumpRender() {
                 if (!ready || rendering) return
                 //console.log("Pumping render", { ready, rendering, currentFrame })
-                seekingOverlay.classList.add("visible");
+                body.classList.add("seeking")
 
                 rendering = true
                 const target = currentFrame
@@ -566,7 +566,7 @@
                     //console.log("Repumping", { target, renderedFrame, currentFrame })
                     pumpRender()
                 } else {
-                    seekingOverlay.classList.remove("visible");
+                    body.classList.remove("seeking");
                 }
 
 
