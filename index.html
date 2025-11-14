@@ -216,9 +216,14 @@
         position: relative;
         display: flex;
         align-items: center;
-        border: 2px solid #ccc;
+        background-color: #555;
         height: 8px;
         width: 100%;
+    }
+
+    body.seeking #frameSliderBar {
+        background-color: orange;
+        transition: background-color 0.3s linear 0.3s;
     }
 
     .frameSliderMarker {
