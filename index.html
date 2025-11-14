@@ -138,10 +138,10 @@
     .marker {
         position: absolute;
         opacity: 0.5;
-        width: 8px;
-        height: 8px;
-        background: black;
-        border: 3px solid white;
+        width: 16px;
+        height: 16px;
+        border: 2px solid white;
+        box-shadow: 2px 2px 0px black;
         border-radius: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
@@ -634,7 +634,21 @@
                 const newFrame = Math.floor(relX * frameTimes.length)
                 setFrame(newFrame)
             })
-            // TODO: Tooltip on frameSlider hover
+
+            async function removeLatestMarker() {
+                if (!ready) return;
+                const currentMarkers = await db.markers
+                    .where('frame').equals(currentFrame)
+                    .toArray();
+                
+                if (currentMarkers.length === 0) return;
+
+                currentMarkers.sort((a, b) => new Date(b.insertedAt) - new Date(a.insertedAt));
+                const latest = currentMarkers[0];
+                if (latest) {
+                    await db.markers.delete([latest.time, latest.x, latest.y, latest.marker, latest.insertedAt]);
+                }
+            }
 
             document.addEventListener('keydown', (e) => {
                 if (!ready) return
@@ -643,11 +657,15 @@
                 const active = document.activeElement;
                 if (active && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
 
+                e.preventDefault()
+
                 if (e.key === 'ArrowLeft') stepDts(-1)
                 if (e.key === 'ArrowRight') stepDts(1)
-                if (e.key === ' ') {
-                    e.preventDefault()
+                if (e.key === ' ') {    
                     stepDts(1)
+                }
+                if (e.key === 'Backspace' || e.key === 'Delete') {
+                    removeLatestMarker()
                 }
 
                 if (/^[a-z0-9]$/.test(e.key)) {
